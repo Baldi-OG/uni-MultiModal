@@ -1,0 +1,2 @@
+torch
+open-clip-torch
