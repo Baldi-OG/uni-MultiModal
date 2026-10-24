@@ -1,0 +1,2 @@
+-Questions: on which kinds of dataset, who is the user, with what intent, what is the algorithmic principle?
+-Choose applications as diverse as possible
