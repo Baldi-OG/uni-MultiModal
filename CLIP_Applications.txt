@@ -1,14 +1,51 @@
--Questions: on which kinds of dataset, who is the user, with what intent, what is the algorithmic principle?
--Choose applications as diverse as possible
-
-
 # Content moderation
+Enforcing text-based rules / content filters over a large set of images uploaded on a social media platform or similar.
+Dataset: Images uploaded on social media.
+User: Moderators of such platforms.
+Intent: Making moderation of images easier by specifying text descriptions of forbidden or allowed images
+(depending on blacklist or whitelist approach).
+Algorithmic principle: Uploaded image features and text rule features are used to calculate probabilities of description
+matching the images, then images are either allowed or disallowed.
 
 # Accessibility
+Automatically generating alt-text for images on webpages.
+Dataset: Images uploaded on webpages.
+User: Owner of website.
+Intent: Automatically generate text descriptions for the already uploaded images, making the websites more accessible to
+users with visual impairments.
+Algorithmic principle: Analyzing website page for page classifying (Model may be fine-tuned to offer more or more precise
+classes) all images and adding a description.
 
 # Disinformation
+Generating either fake images / videos / audio to support made up / altered stories. Taking existing images / videos
+/ audio out of context.
+Dataset: In the taking out of context case news stories with images, etc. In the generating fakes case text descriptions
+of made up stories.
+User: Governments, Politicians, Secret Services, Military, etc
+Intent: Gaining public support for policies / operations or undermining opponents public support.
+Algorithmic principle: Fine-tuning / modifying a model to embedd a certain narrative or prompt-engineering to get
+results that serve ones narrative.
 
 # Creative Work / Art
+Experimenting with text to image generation to create works of art.
+Dataset: Could be anything
+User: Artists
+Intent: Creating some output with artistic / creative value such as creating beautiful wallpapers
+Algorithmic principle: Prompt-engineering or using the methods developed by your research group such as
+Iterative Human Feedback ;)
 
-# Military
-- https://arxiv.org/abs/2508.20760
+
+# Military [1]
+Many use cases possible, for example obtaining strike targets.
+Dataset: Satellite / Drone images and text descriptions.
+User: Military command
+Intent: Automating the generation of strike targets by specifying targets using a text Description (For example of special
+military vehicles or installations such as radar stations)
+Algorithmic principle: Model is provided with a drone / satellite image feed and given the task of identifying certain
+targets based on the text description. From the targets a (more or less rough) location is extracted and passed to a
+strike operators.
+[1]https://arxiv.org/abs/2508.20760
+
+
+As with most technologies in Computer Science, this can be used for bad! We all should be careful about what our
+research can be used for.
