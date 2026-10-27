@@ -2,3 +2,5 @@ torch
 open-clip-torch
 ipywidgets
 pillow
+umap-learn[plot]
+numpy
