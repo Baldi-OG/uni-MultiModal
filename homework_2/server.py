@@ -18,6 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import torch
+import numpy as np
+from numpy.typing import NDArray
 import base64
 import io
 from PIL import Image
@@ -40,6 +42,7 @@ app.add_middleware(
 
 ### Classes ###
 
+#TODO: make sure these can actually be returned
 class ErrorBase(BaseModel):
     error: str
 
@@ -122,19 +125,33 @@ INFO_RESPONSES = {
 
 ## Endpoints ###
 
+#TODO: return proper error codes
 @app.post("/predict",
           response_model=PredictionResponse,
           responses=PREDICT_RESPONSES)
 def predict(body: PredictionRequest):
+    # convert and validate base64 image
     try:
         image, format = image_from_base64(body.image)
     except ValueError as e:
         return BadRequest(error=str(e)) # directly return base64 decoding errors as BadRequest
+    if format != "PNG":
+        return BadRequest(error="Image must be a PNG")
+    if image.width < 1 or image.height < 1 or image.width > 1024 or image.height > 1024:
+        return BadRequest(error="Image must be between 1x1 and 1024x1024 pixels")
 
-    if not validate_image(image, format):
-        return BadRequest(error="Image must be a PNG and between 1x1 and 1024x1024 pixels")
-    
-    end_points = model.predict(image, body.classes)
+    # validate classes
+    classes = np.unique(np.array(body.classes))  # filter duplicates and transform to tensor
+    # duplicates are not valid so return error
+    if classes.shape[0] != len(body.classes):
+        return BadRequest(error="Duplicate class strings are not allowed")
+    if classes.shape[0] > 50:
+        return BadRequest(error="Too many classes, maximum is 50")
+    if any(len(cls) > 200 for cls in body.classes):
+        return BadRequest(error="Class strings must be at most 200 characters long")
+
+
+    end_points = model.predict(image, classes)
     return PredictionResponse(
             **end_points
     )
@@ -160,7 +177,7 @@ def image_from_base64(image_64: str):
 
     try:
         img_bytes = base64.b64decode(image_64, validate=True)
-    except (ValueError, binascii.Error) as e:
+    except (ValueError) as e:
         raise ValueError("Invalid base64 data") from e
 
     # PNG detection: check signature before decoding
@@ -172,21 +189,6 @@ def image_from_base64(image_64: str):
         return img.copy(), img.format  # return a usable in-memory image
 
 
-def validate_image(image: Image.Image, format) -> bool:
-    """
-    Returns True if the image fulfills the requirements, False otherwise.
-    """
-    # verify image is png
-    if format != "PNG":
-        return False
-
-    #verify image is between 1x1 and 1024x1024 pixels
-    if image.width < 1 or image.height < 1 or image.width > 1024 or image.height > 1024:
-        return False
-
-    return True
-
-#TODO: images need to be properly preprocessed (transformed to RGB with no alpha channel)
 
 
 class ClipModel:
@@ -204,11 +206,13 @@ class ClipModel:
         #TODO: train emotion classifier head
 
     def preprocess_image(self, image: Image.Image) -> torch.Tensor:
+        # remove possible alpha channel and convert to 8-bit RGB
+        image = image.convert("RGB")
 
         return self.preprocess(image).unsqueeze(0)  # Add batch dimension
 
     @torch.no_grad()
-    def predict(self, image: Image.Image, classes: list[str]) -> dict[str, dict[str, float]]:
+    def predict(self, image: Image.Image, classes: NDArray) -> dict[str, dict[str, float]]:
         # TODO: at least from mnist tests the clip preprocessing seems to be worse, test whether this is true in general
         image_tensor = self.preprocess_image(image)  # Add batch dimension #TODO: is this necessary?
         text_inputs = self.tokenizer(classes)
@@ -251,3 +255,4 @@ if __name__ == '__main__':
     weights_dir = sys.argv[4]
 
     uvicorn.run(app="server:app", host="0.0.0.0", port=port, reload=True)
+    torch.random.manual_seed(671611312)    # set fixed seed to ensure determinism requirement
