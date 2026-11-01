@@ -31,6 +31,7 @@ app = FastAPI(title="Image Classification API", version="v1.0")
 # uv run server.py --port 8000 --weights-dir ./weights
 ##
 
+# noinspection bad-argument-type
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -117,7 +118,7 @@ def predict(body: PredictionRequest):
         image, image_format = image_from_base64(body.image)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))  # directly return base64 decoding errors as BadRequest
-    if image.__sizeof__() > 1e7: # Larger than 10MB
+    if image.__sizeof__() > 1e7:  # Larger than 10MB
         raise HTTPException(status_code=413, detail="Image must not be larger than 10MB")
     if image_format != "PNG":
         raise HTTPException(status_code=400, detail="Image must be a PNG")
