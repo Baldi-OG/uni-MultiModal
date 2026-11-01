@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from numpy.typing import NDArray
 from pydantic import BaseModel
+import argparse
 
 app = FastAPI(title="Image Classification API", version="v1.0")
 
@@ -176,18 +177,30 @@ def image_from_base64(image_64: str) -> tuple[Image.Image, str]:
 
 class ClipModel:
     def __init__(self, model_name="ViT-B-32", pretrained="laion2b_s34b_b79k"):
-        self.model, _, self.preprocess = open_clip.create_model_and_transforms(model_name=model_name,
+        self.clip_backbone, _, self.preprocess = open_clip.create_model_and_transforms(model_name=model_name,
                                                                                pretrained=pretrained)
-        if torch.cuda.is_available():
-            self.model = self.model.cuda()
-        self.model.eval()  # model in train mode by default, impacts some models with BatchNorm or stochastic depth active
         self.tokenizer = open_clip.get_tokenizer('ViT-B-32')
 
         self.emotions = ["anger", "disgust", "fear", "happiness", "sadness", "surprise", "neutral"]
         self.emotion_classes = self.tokenizer(self.emotions)
+
+        self.emotion_classifier_head = torch.nn.Linear(self.clip_backbone.visual.output_dim, self.clip_backbone.visual.output_dim)
+
         if torch.cuda.is_available():
+            self.clip_backbone.cuda()
+            self.emotion_classifier_head.cuda()
             self.emotion_classes = self.emotion_classes.cuda()
-        # TODO: train emotion classifier head
+
+        self.clip_backbone.eval()
+        self.emotion_classifier_head.eval()
+
+        self.emotion_features = self.clip_backbone.encode_text(self.emotion_classes)
+        self.emotion_features /= self.emotion_features.norm(dim=-1, keepdim=True)
+
+        try:
+            self.emotion_classifier_head.load_state_dict(torch.load("weights/emotion_classifier_head.pth"))
+        except FileNotFoundError:
+            print("Warning: Could not find weights for emotion classifier head. Please ensure that the file 'weights/emotion_classifier_head.pth' exists.", file=sys.stderr)
 
     def preprocess_image(self, image: Image.Image) -> torch.Tensor:
         # remove possible alpha channel and convert to 8-bit RGB
@@ -205,18 +218,18 @@ class ClipModel:
             image_tensor = image_tensor.cuda()
             text_inputs = text_inputs.cuda()
 
-        image_features = self.model.encode_image(image_tensor)
-        text_features = self.model.encode_text(text_inputs)
-        emotion_features = self.model.encode_text(self.emotion_classes)
+        image_features = self.clip_backbone.encode_image(image_tensor)
+        image_emotion_features = self.emotion_classifier_head(image_features)
+        text_features = self.clip_backbone.encode_text(text_inputs)
 
         # Normalize features
         image_features /= image_features.norm(dim=-1, keepdim=True)
+        image_emotion_features /= image_emotion_features.norm(dim=-1, keepdim=True)
         text_features /= text_features.norm(dim=-1, keepdim=True)
-        emotion_features /= emotion_features.norm(dim=-1, keepdim=True)
 
         # Compute similarity
         text_similarity = (100.0 * image_features @ text_features.T).softmax(dim=-1)
-        emotion_similarity = (100.0 * image_features @ emotion_features.T).softmax(dim=-1)
+        emotion_similarity = (100.0 * image_emotion_features @ self.emotion_features.T).softmax(dim=-1)
 
         end_points = {
             "classes": {cls: float(text_similarity[0][i]) for i, cls in enumerate(classes)},
@@ -235,8 +248,14 @@ def get_model_version() -> str:
 model = ClipModel()
 
 if __name__ == '__main__':
-    port = int(sys.argv[2])
-    weights_dir = sys.argv[4]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-r", "--random_seed", default=671611312, type=int, help="random seed")
+    parser.add_argument("-p", "--port", default=8000, type=int, help="port to run the server on")
+    parser.add_argument("-w", "--weights-dir", default="./weights", type=str, help="directory to load model weights from")
+
+    args = parser.parse_args()
+    port = args.port
+    weights_dir = args.weights_dir
 
     uvicorn.run(app="server:app", host="0.0.0.0", port=port, reload=True)
-    torch.random.manual_seed(671611312)  # set fixed seed to ensure determinism requirement
+    torch.random.manual_seed(671611312)    # set fixed seed to ensure determinism requirement
