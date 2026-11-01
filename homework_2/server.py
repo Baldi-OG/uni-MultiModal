@@ -13,7 +13,7 @@
 import sys
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -40,24 +40,7 @@ app.add_middleware(
 )
 
 
-### Classes ###
-
-#TODO: make sure these can actually be returned
-class ErrorBase(BaseModel):
-    error: str
-
-
-class BadRequest(ErrorBase):
-    code: int = 400
-
-
-class PayloadTooLarge(ErrorBase):
-    code: int = 413
-
-
-class InternalServerError(ErrorBase):
-    code: int = 500
-
+### Models ###
 
 class PredictionRequest(BaseModel):
     image: str
@@ -125,35 +108,37 @@ INFO_RESPONSES = {
 
 ## Endpoints ###
 
-#TODO: return proper error codes
 @app.post("/predict",
           response_model=PredictionResponse,
           responses=PREDICT_RESPONSES)
 def predict(body: PredictionRequest):
     # convert and validate base64 image
     try:
-        image, format = image_from_base64(body.image)
+        image, image_format = image_from_base64(body.image)
     except ValueError as e:
-        return BadRequest(error=str(e)) # directly return base64 decoding errors as BadRequest
-    if format != "PNG":
-        return BadRequest(error="Image must be a PNG")
-    if image.width < 1 or image.height < 1 or image.width > 1024 or image.height > 1024:
-        return BadRequest(error="Image must be between 1x1 and 1024x1024 pixels")
+        return HTTPException(status_code=400, detail=str(e))  # directly return base64 decoding errors as BadRequest
+    if image.__sizeof__() > 1e7: # Larger than 10MB
+        return HTTPException(status_code=413, detail="Image must not be larger than 10MB")
+    if image_format != "PNG":
+        return HTTPException(status_code=400, detail="Image must be a PNG")
+    if image.width < 1 or image.height < 1:
+        return HTTPException(status_code=400, detail="Image must be at lest 1x1 pixels large")
+    if image.width > 1024 or image.height > 1024:
+        return HTTPException(status_code=413, detail="Image must not be larger than 1024x1024 pixels")
 
     # validate classes
     classes = np.unique(np.array(body.classes))  # filter duplicates and transform to tensor
     # duplicates are not valid so return error
     if classes.shape[0] != len(body.classes):
-        return BadRequest(error="Duplicate class strings are not allowed")
+        return HTTPException(status_code=400, detail="Duplicate class strings are not allowed")
     if classes.shape[0] > 50:
-        return BadRequest(error="Too many classes, maximum is 50")
+        return HTTPException(status_code=400, detail="Too many classes, maximum is 50")
     if any(len(cls) > 200 for cls in body.classes):
-        return BadRequest(error="Class strings must be at most 200 characters long")
-
+        return HTTPException(status_code=400, detail="Class strings must be at most 200 characters long")
 
     end_points = model.predict(image, classes)
     return PredictionResponse(
-            **end_points
+        **end_points
     )
 
 
@@ -166,8 +151,7 @@ def info():
     )
 
 
-
-def image_from_base64(image_64: str):
+def image_from_base64(image_64: str) -> tuple[Image.Image, str]:
     # Accept both raw base64 and data URLs
     if image_64.startswith("data:"):
         header, _, encoded = image_64.partition(",")
@@ -177,7 +161,7 @@ def image_from_base64(image_64: str):
 
     try:
         img_bytes = base64.b64decode(image_64, validate=True)
-    except (ValueError) as e:
+    except ValueError as e:
         raise ValueError("Invalid base64 data") from e
 
     # PNG detection: check signature before decoding
@@ -186,14 +170,13 @@ def image_from_base64(image_64: str):
 
     with Image.open(io.BytesIO(img_bytes)) as img:
         img.load()  # fully decode image data
-        return img.copy(), img.format  # return a usable in-memory image
-
-
+        return img.copy(), str(img.format)  # return a usable in-memory image
 
 
 class ClipModel:
     def __init__(self, model_name="ViT-B-32", pretrained="laion2b_s34b_b79k"):
-        self.model, _, self.preprocess = open_clip.create_model_and_transforms(model_name=model_name, pretrained=pretrained)
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms(model_name=model_name,
+                                                                               pretrained=pretrained)
         if torch.cuda.is_available():
             self.model = self.model.cuda()
         self.model.eval()  # model in train mode by default, impacts some models with BatchNorm or stochastic depth active
@@ -203,7 +186,7 @@ class ClipModel:
         self.emotion_classes = self.tokenizer(self.emotions)
         if torch.cuda.is_available():
             self.emotion_classes = self.emotion_classes.cuda()
-        #TODO: train emotion classifier head
+        # TODO: train emotion classifier head
 
     def preprocess_image(self, image: Image.Image) -> torch.Tensor:
         # remove possible alpha channel and convert to 8-bit RGB
@@ -235,9 +218,9 @@ class ClipModel:
         emotion_similarity = (100.0 * image_features @ emotion_features.T).softmax(dim=-1)
 
         end_points = {
-                "classes": {cls: float(text_similarity[0][i]) for i, cls in enumerate(classes)},
-                "emotions": {cls: float(emotion_similarity[0][i]) for i, cls in enumerate(self.emotions)}
-                }
+            "classes": {cls: float(text_similarity[0][i]) for i, cls in enumerate(classes)},
+            "emotions": {cls: float(emotion_similarity[0][i]) for i, cls in enumerate(self.emotions)}
+        }
         # Convert to dictionary
         return end_points
 
@@ -255,4 +238,4 @@ if __name__ == '__main__':
     weights_dir = sys.argv[4]
 
     uvicorn.run(app="server:app", host="0.0.0.0", port=port, reload=True)
-    torch.random.manual_seed(671611312)    # set fixed seed to ensure determinism requirement
+    torch.random.manual_seed(671611312)  # set fixed seed to ensure determinism requirement
