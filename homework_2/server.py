@@ -10,20 +10,19 @@
 #   "open-clip-torch>=3.3.0",
 # ]
 # ///
-import sys
-
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
-import torch
-import numpy as np
-from numpy.typing import NDArray
 import base64
 import io
-from PIL import Image
+import sys
+
+import numpy as np
 import open_clip
+import torch
+import uvicorn
+from PIL import Image
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from numpy.typing import NDArray
+from pydantic import BaseModel
 
 app = FastAPI(title="Image Classification API", version="v1.0")
 
@@ -63,6 +62,7 @@ class InfoResponse(BaseModel):
 
 PREDICT_RESPONSES = {
     200: {"description": "OK",
+          "model": PredictionResponse,
           "content": {
               "application/json": {
                   "example": {
@@ -109,32 +109,32 @@ INFO_RESPONSES = {
 ## Endpoints ###
 
 @app.post("/predict",
-          response_model=PredictionResponse,
-          responses=PREDICT_RESPONSES)
+          responses=PREDICT_RESPONSES
+          )
 def predict(body: PredictionRequest):
     # convert and validate base64 image
     try:
         image, image_format = image_from_base64(body.image)
     except ValueError as e:
-        return HTTPException(status_code=400, detail=str(e))  # directly return base64 decoding errors as BadRequest
+        raise HTTPException(status_code=400, detail=str(e))  # directly return base64 decoding errors as BadRequest
     if image.__sizeof__() > 1e7: # Larger than 10MB
-        return HTTPException(status_code=413, detail="Image must not be larger than 10MB")
+        raise HTTPException(status_code=413, detail="Image must not be larger than 10MB")
     if image_format != "PNG":
-        return HTTPException(status_code=400, detail="Image must be a PNG")
+        raise HTTPException(status_code=400, detail="Image must be a PNG")
     if image.width < 1 or image.height < 1:
-        return HTTPException(status_code=400, detail="Image must be at lest 1x1 pixels large")
+        raise HTTPException(status_code=400, detail="Image must be at lest 1x1 pixels large")
     if image.width > 1024 or image.height > 1024:
-        return HTTPException(status_code=413, detail="Image must not be larger than 1024x1024 pixels")
+        raise HTTPException(status_code=413, detail="Image must not be larger than 1024x1024 pixels")
 
     # validate classes
     classes = np.unique(np.array(body.classes))  # filter duplicates and transform to tensor
     # duplicates are not valid so return error
     if classes.shape[0] != len(body.classes):
-        return HTTPException(status_code=400, detail="Duplicate class strings are not allowed")
+        raise HTTPException(status_code=400, )
     if classes.shape[0] > 50:
-        return HTTPException(status_code=400, detail="Too many classes, maximum is 50")
+        raise HTTPException(status_code=400, detail="Too many classes, maximum is 50")
     if any(len(cls) > 200 for cls in body.classes):
-        return HTTPException(status_code=400, detail="Class strings must be at most 200 characters long")
+        raise HTTPException(status_code=400, detail="Class strings must be at most 200 characters long")
 
     end_points = model.predict(image, classes)
     return PredictionResponse(
