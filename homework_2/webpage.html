@@ -2,7 +2,7 @@
 
 <!-- Graph by https://frontendcoding.com -->
 <!-- TODO Add custom classes -->
-<!-- TODO Handle the python server not being available -->
+<!-- TODO Add Examples -->
 
 <html lang="en" xmlns="http://www.w3.org/1999/html">
 <head>
@@ -13,8 +13,8 @@
             margin: 0 auto;
             border: 3px solid black;
             width: fit-content;
-            padding-left: 2px;
-            padding-right: 2px;
+            padding-left: 5px;
+            padding-right: 5px;
             background: antiquewhite;
         }
 
@@ -326,6 +326,7 @@
 
     <script>
         const apiInfo = "http://127.0.0.1:8000/info"
+        modelInfoDiv = document.getElementById("model-info")
         fetch(apiInfo)
             .then(response => response.json())
             .then(data => {
@@ -334,11 +335,14 @@
                 const max_image_size = data.max_image_size;
                 const max_classes = data.max_classes;
 
-                document.getElementById("model-info").innerHTML =
-                    `<p><strong>Team:</strong> ${team}</p>
+                modelInfoDiv.innerHTML = `<p><strong>Team:</strong> ${team}</p>
                 <p><strong>Model version:</strong> ${model_version}</p>
                 <p><strong>Max image size:</strong> ${max_image_size}</p>
                 <p><strong>Max classes:</strong> ${max_classes}</p>`;
+            })
+            .catch(reason => {
+                modelInfoDiv.innerHTML = `<h2>Server not reachable!</h2>
+                <p></p>${reason}</p>`
             })
 
     </script>
