@@ -245,7 +245,7 @@ class ClipModel:
 ### Util ###
 def get_model_version() -> str:
     # TODO: Grab this automatically from the git log
-    return "last model-relevant git commit hash"
+    return "a4e3d877e8786b423870c01bfe018c4715ee39d7"
 
 
 model = ClipModel()
