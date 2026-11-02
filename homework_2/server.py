@@ -18,6 +18,7 @@
 # torch = { index = "pytorch-cu132" }
 # torchvision = { index = "pytorch-cu132" }
 # ///
+import argparse
 import base64
 import io
 import sys
@@ -31,7 +32,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from numpy.typing import NDArray
 from pydantic import BaseModel
-import argparse
 
 app = FastAPI(title="Image Classification API", version="v1.0")
 
@@ -185,16 +185,18 @@ def image_from_base64(image_64: str) -> tuple[Image.Image, str]:
 
 class ClipModel:
     def __init__(self, model_name="ViT-B-32", pretrained="laion2b_s34b_b79k"):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.clip_backbone, _, self.preprocess = open_clip.create_model_and_transforms(model_name=model_name,
-                                                                               pretrained=pretrained)
+                                                                                       pretrained=pretrained)
         self.tokenizer = open_clip.get_tokenizer('ViT-B-32')
 
         self.emotions = ["anger", "disgust", "fear", "happiness", "sadness", "surprise", "neutral"]
         self.emotion_classes = self.tokenizer(self.emotions)
 
-        self.emotion_classifier_head = torch.nn.Linear(self.clip_backbone.visual.output_dim, self.clip_backbone.visual.output_dim)
+        self.emotion_classifier_head = torch.nn.Linear(self.clip_backbone.visual.output_dim,
+                                                       self.clip_backbone.visual.output_dim)
 
-        if torch.cuda.is_available():
+        if self.device == torch.device("cuda"):
             self.clip_backbone.cuda()
             self.emotion_classifier_head.cuda()
             self.emotion_classes = self.emotion_classes.cuda()
@@ -206,10 +208,13 @@ class ClipModel:
         self.emotion_features /= self.emotion_features.norm(dim=-1, keepdim=True)
 
         try:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.emotion_classifier_head.load_state_dict(torch.load("weights/emotion_classifier_head.pth", device))
+            self.emotion_classifier_head.load_state_dict(
+                torch.load("weights/emotion_classifier_head.pth", map_location=self.device))
         except FileNotFoundError:
-            print("Warning: Could not find weights for emotion classifier head. Please ensure that the file 'weights/emotion_classifier_head.pth' exists.", file=sys.stderr)
+            print(
+                "Warning: Could not find weights for emotion classifier head. Please ensure that the file"
+                " 'weights/emotion_classifier_head.pth' exists.",
+                file=sys.stderr)
 
     def preprocess_image(self, image: Image.Image) -> torch.Tensor:
         # remove possible alpha channel and convert to 8-bit RGB
@@ -260,11 +265,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-r", "--random_seed", default=671611312, type=int, help="random seed")
     parser.add_argument("-p", "--port", default=8000, type=int, help="port to run the server on")
-    parser.add_argument("-w", "--weights-dir", default="./weights", type=str, help="directory to load model weights from")
+    parser.add_argument("-w", "--weights-dir", default="./weights", type=str,
+                        help="directory to load model weights from")
 
     args = parser.parse_args()
     port = args.port
     weights_dir = args.weights_dir
 
     uvicorn.run(app="server:app", host="0.0.0.0", port=port, reload=True)
-    torch.random.manual_seed(671611312)    # set fixed seed to ensure determinism requirement
+    torch.random.manual_seed(671611312)  # set fixed seed to ensure determinism requirement
