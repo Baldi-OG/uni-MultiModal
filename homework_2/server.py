@@ -2,13 +2,21 @@
 # requires-python = "==3.12.*"
 # dependencies = [
 #   "torch>=2.14.1",
-#   "torchaudio>=2.11.0",
 #   "torchvision>=0.29.1",
 #   "fastapi==0.162.0",
 #   "uvicorn==0.34.0",
 #   "pydantic>=2.14.2",
 #   "open-clip-torch>=3.3.0",
 # ]
+#
+# [[tool.uv.index]]
+# name = "pytorch-cu132"
+# url = "https://download.pytorch.org/whl/cu132"
+# explicit = true
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-cu132" }
+# torchvision = { index = "pytorch-cu132" }
 # ///
 import base64
 import io
@@ -198,7 +206,8 @@ class ClipModel:
         self.emotion_features /= self.emotion_features.norm(dim=-1, keepdim=True)
 
         try:
-            self.emotion_classifier_head.load_state_dict(torch.load("weights/emotion_classifier_head.pth"))
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.emotion_classifier_head.load_state_dict(torch.load("weights/emotion_classifier_head.pth", device))
         except FileNotFoundError:
             print("Warning: Could not find weights for emotion classifier head. Please ensure that the file 'weights/emotion_classifier_head.pth' exists.", file=sys.stderr)
 
