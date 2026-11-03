@@ -2,7 +2,6 @@
 
 <!-- Graph by https://frontendcoding.com -->
 <!-- TODO Add custom classes -->
-<!-- TODO Add Examples -->
 
 <html lang="en" xmlns="http://www.w3.org/1999/html">
 <head>
@@ -46,6 +45,12 @@
             background: #353C59;
             padding: 5px 10px;
             color: white;
+        }
+
+        .classesInput {
+            resize: none;
+            width: fit-content;
+            height: 20px;
         }
 
         .bar-graph-container {
@@ -225,9 +230,11 @@
                  alt="Image view" class="imageView"/>
             <input id="imageUpload" style="margin: auto;" type="file" accept="image/*" hidden="hidden">
         </label>
-        <div id="error-text" class="errorText" hidden="hidden">
-
-        </div>
+        <label>
+            <textarea id="classes-input" class="classesInput" rows="1">Person,Anime</textarea>
+        </label>
+        <div id="classes-result" class="classesOutput" hidden="hidden"></div>
+        <div id="error-text" class="errorText" hidden="hidden"></div>
     </div>
     <div style="margin: auto" class="bar-graph-container">
         <figure class="bar-graph">
@@ -264,7 +271,7 @@
             let reader = new FileReader();
             reader.onload = function (event) {
                 let base64String = event.target.result;
-
+                let classes = document.getElementById("classes-input").value;
                 fetch(predictApi, {
                     method: 'POST',
                     headers: {
@@ -272,7 +279,7 @@
                     },
                     body: JSON.stringify({
                         image: base64String,
-                        classes: []
+                        classes: classes.split(",")
                     })
                 })
                     .then(response => response.json())
@@ -305,6 +312,7 @@
                         const surprise = rounding(emotions.surprise)
                         const neutral = rounding(emotions.neutral)
 
+
                         document.getElementById("graph-data").innerHTML =
                             `<div class="bar-graph-bar" title="${anger}%" style="--value: ${anger}%;"></div>
                                 <div class="bar-graph-bar" title="${disgust}%" style="--value: ${disgust}%;"></div>
@@ -313,6 +321,18 @@
                                 <div class="bar-graph-bar" title="${sadness}%" style="--value: ${sadness}%;"></div>
                                 <div class="bar-graph-bar" title="${surprise}%" style="--value: ${surprise}%;"></div>
                                 <div class="bar-graph-bar" title="${neutral}%" style="--value: ${neutral}%;"></div>`
+
+                        const classesResult = data.classes
+                        const classesResultTextField = document.getElementById("classes-result")
+                        if (!classes) {
+                            classesResultTextField.hidden = true
+                        } else {
+                            classesResultTextField.innerText = JSON.stringify(classesResult)
+                                .replaceAll(",", "\n")
+                                .replace("{", "")
+                                .replace("}", "")
+                            classesResultTextField.hidden = false
+                        }
                     })
             }
             reader.readAsDataURL(file);
