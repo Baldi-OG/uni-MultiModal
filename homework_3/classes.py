@@ -1,5 +1,12 @@
+import io
+import json
+import os
+
 import open_clip
 import torch
+from PIL import Image
+
+from homework_3.functions import parse_img, api_response_to_tensor
 
 
 class ClipModel(torch.nn.Module):
@@ -66,3 +73,42 @@ class ClipModel(torch.nn.Module):
         concept1_similarity = (100.0 * concept1_features @ self.concept1_class_features.T).softmax(dim=-1)
         concept2_similarity = (100.0 * concept2_features @ self.concept2_class_features.T).softmax(dim=-1)
         return torch.cat((concept1_similarity, concept2_similarity), dim=1)
+
+
+class ApiResponsesDataset(torch.utils.data.Dataset):
+    def __init__(self, clip_preprocess, img_dir="../img", img_series=None, responses_cache="../cache/responses.json"):
+        super().__init__()
+
+        self.clip_preprocess = clip_preprocess
+        self.responses_json = json.load(open(responses_cache, "r"))
+
+        self.raw_images = []
+        if img_dir:
+            self.raw_images = [Image.open(f"{img_dir}/{p}") for p in os.listdir(img_dir)]
+        if img_series is not None:
+            self.raw_images.extend([Image.open(io.BytesIO(i['bytes'])) for i in img_series])
+
+        self.data = []
+        self.labels = []
+
+        self._preprocess()
+
+    def _preprocess(self):
+        self.data = [self.clip_preprocess(raw_img) for raw_img in self.raw_images]
+
+        try:
+            for raw_img in self.raw_images:
+                _, img_hash = parse_img(raw_img)
+                response = self.responses_json[img_hash]
+                label = api_response_to_tensor(response)
+                self.labels.append(label)
+        except KeyError:
+            exit(f"Dataset integrity error. Not all images have responses.")
+
+        assert len(self.data) == len(self.labels), "Unequal amount of data and labels loaded"
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        return self.data[index], self.labels[index]
