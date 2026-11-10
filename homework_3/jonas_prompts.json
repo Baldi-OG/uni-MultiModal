@@ -1,0 +1,72 @@
+[
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Ran one web search for Hugging Face download/popularity data on CLIP checkpoints, then combined it with known model specs (parameter counts) to rank models by commonality and estimate inference VRAM (fp16 weights ≈ 2 bytes/param plus activation overhead; fp32 doubles it).",
+    "prompt": "Provide me with a list of commonly used CLIP models. Including multiple model sizes. Rank them according to their commonality. Also provide insight in how much VRAM is required to run them.",
+    "location_of_edit": "No code edited; answer given in chat. prompts.json entry appended.",
+    "knowledge_extracted": "Ranking (approx., by HF usage): 1) openai/clip-vit-large-patch14 (~428M params, ~1-2 GB VRAM fp16; SD 1.x text encoder, ~50M+ downloads), 2) openai/clip-vit-base-patch32 (~151M, <1 GB), 3) openai/clip-vit-base-patch16 (~150M, ~1 GB), 4) openai/clip-vit-large-patch14-336 (~428M, ~2 GB; LLaVA vision tower), 5) laion/CLIP-ViT-H-14-laion2B (~986M, ~2-4 GB; SD 2.x), 6) laion/CLIP-ViT-bigG-14-laion2B (~2.5B, ~5-8 GB; SDXL), 7) google/siglip-so400m-patch14-384 (~878M, ~2-3 GB; CLIP-like sigmoid loss), 8) OpenAI RN50 (~102M, <1 GB). Rule of thumb: VRAM ≈ params × 2 bytes (fp16) + 0.5-2 GB overhead depending on batch size; fp32 doubles weights; training needs ~4-8x more."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Wrote a Python class BlackBoxClient (requests + SQLite cache keyed by SHA-256 pixel hash) for querying the closed-box model API; tested it against a local mock HTTP server (retry on 503, de-duplication, cache hits, NPZ export) – all passed.",
+    "prompt": "Schreibe mir bitte eine Klasse, die einen API endpunkt Anfragen stellt. Also hier unserem closed-box model. Wahrscheinlich macht es Sinn, wenn ich einen Bild Hash berechne und die Ergebnisse in einer sqllite Datei speichere anstatt sie in einem numpy file zu speichrn, oder?",
+    "location_of_edit": "New file blackbox_client.py: class BlackBoxClient (__init__ with SQLite schema, image_hash, get_cached/_store, _build_request/_parse_response (API-specific, to be adapted), _post with retry/backoff, query, export_npz).",
+    "knowledge_extracted": "SQLite + image hash is better than a single .npy for API queries: incremental/crash-safe saving after each batch, no repeated (budget-consuming) queries for identical images, fast lookup by hash. Hash raw pixels (mode+size+bytes), not file bytes, so the same image in different formats maps to one key. Store vectors as float32 BLOBs; export to .npz for training. Request/response format of the API is still an assumption."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Ran three web searches (CLIP_benchmark HF datasets, DomainNet on HF, ImageNet-R/Sketch on HF) and compared candidates by domain/concept diversity and suitability for discriminating CLIP models.",
+    "prompt": "Durchsuche das Internet nach einem Huggingface Datensatz. Er sollte folgende Eigenschaften haben: * er sollte Bilder enthalten * er sollte viele verschiedene Domänen und Konzepte abbilden -> Soll diskriminativ für CLIP Modellvergleich eingestezt werden",
+    "location_of_edit": "No code edited; answer in chat. prompts.json entry appended.",
+    "knowledge_extracted": "Top pick: DomainNet (HF: wltjr1007/DomainNet) – ~600k images, 345 classes, 6 domains (real, clipart, painting, sketch, infograph, quickdraw). Complement: LAION CLIP_benchmark datasets on HF (clip-benchmark/wds_*, e.g. wds_eurosat, wds_dtd, wds_fgvc_aircraft, wds_vtab-pcam, wds_imagenet-r) covering satellite, medical, textures, fine-grained, renditions – the standard suite in which CLIP models differ most. Alternative: axiong/imagenet-r (30k renditions, 200 classes). For a query budget, take a stratified subsample across domains/classes."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Ran a web search on ridge regression / closed-form linear maps between embedding spaces (model stitching, linear alignment of CLIP), then explained the closed-form solution, when it is exact vs. approximate, and how to use it for backbone identification; provided a short sklearn RidgeCV snippet.",
+    "prompt": "Wie du weißt versuche ich in meiner Hausaufgabe ein closed-box Modell (das CLIP mit einem linearen Head) mit lokalen surrogate Modellen anzunähern. Eine offensichtliche Idee ist es einfach einen MLP Head drauf zu setzen und diesen mit MSE loss anzupassen. Ich errinere mich aber dass sowas auch irgendwie mit ridge regression funktionieren könnte. Kannst du für mich nochmal nachschlagen wie das geht und ob das hier sinnvoll ist?",
+    "location_of_edit": "No file edited; snippet in chat (surrogate fitting step after collecting API outputs with BlackBoxClient).",
+    "knowledge_extracted": "Ridge closed form: W = (ZᵀZ + λI)⁻¹ZᵀY, Z = frozen local CLIP features, Y = API outputs; convex, no training loop, λ via CV. If the local backbone equals the hidden one, the target is exactly linear in the features, so ridge recovers the head almost exactly with ~d+1 queries (d=512/768/1024/1280) – very query-efficient. Fitting ridge for each candidate CLIP and comparing held-out R² identifies the hidden backbone. If backbones differ, a linear map still works reasonably well (cf. model stitching, linear alignment of VLMs); then an MLP can add capacity (init with ridge or fit residuals). If the API returns probabilities, regress on log-probs (row-centered) instead. Match preprocessing/normalization (L2-normalized embeddings)."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Answered from knowledge of the scikit-learn API (no tools besides logging): compared sklearn.linear_model.Ridge and RidgeCV.",
+    "prompt": "Was ist der Unterschied zwischen Ridge und RidgeCV import?",
+    "location_of_edit": "No file edited; relates to the ridge-fitting snippet (surrogate head) from the previous answer.",
+    "knowledge_extracted": "Ridge: one fixed alpha (default 1.0), you choose λ yourself. RidgeCV: takes a list of alphas, selects the best by cross-validation and refits on all data; best value in .alpha_. Default cv=None uses efficient leave-one-out (GCV, closed form, almost as fast as a single fit); cv=k uses k-fold. alpha_per_target=True picks a separate λ per output dimension (useful for multi-output API targets). Use RidgeCV to find λ, Ridge(alpha=found) for fixed/reproducible fits."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Explained that sklearn Pipeline chains transformers + one final estimator (so Ridge -> RidgeCV -> MLP cannot be chained). Wrote and ran a comparison script on dummy data: separate candidate pipelines (StandardScaler + RidgeCV / MLPRegressor / custom RidgePlusMLP residual estimator) evaluated by held-out R².",
+    "prompt": "Also kann ich mir auch einfach eine Pipeline mit Rudge, RidgeCV und MLP Regressor bauen, oder?",
+    "location_of_edit": "Snippet in chat (surrogate-fitting stage): candidates dict of pipelines, new class RidgePlusMLP (fit: ridge then MLP on residuals; predict: sum), evaluation loop.",
+    "knowledge_extracted": "A sklearn Pipeline can only have one final estimator; regressors are not transformers, so they can't be chained. Ridge vs RidgeCV is redundant (RidgeCV already includes the λ search). Correct approach: build one pipeline per candidate and compare on a held-out set (or use a residual model / StackingRegressor to combine). Dummy test with a mostly linear target: ridge R²=1.000, MLP 0.919, ridge+MLP 0.9996 – an MLP alone is worse at linear targets and can overfit the residual, so only add it if ridge is clearly below R²≈1. MLPRegressor needs scaling + early_stopping; for large n use PyTorch."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Implemented class Endpoint in endpoint.py (requests.Session, SQLite table responses(image_hash, response)), then tested it against a local mock server: token header sent, 429 + Retry-After retried, duplicate image served from cache, repeated query made no new request – all passed.",
+    "prompt": "Kannst du für mich die API Endpoint class Endpoint implementieren? Nutze requets Session, speichere Ergebnisse mit sqllite3 ab (Format Bildhash , Response)",
+    "location_of_edit": "New file endpoint.py: class Endpoint – __init__ (Session + token header, CREATE TABLE responses), load_image/hash_image/to_png, get/_save/__contains__/__len__, _send (API-format-specific, adapt here), _request (retry/backoff/rate limit), query, query_many, context manager.",
+    "knowledge_extracted": "Simplified version of the earlier BlackBoxClient: stores the raw JSON response as TEXT per image hash instead of a float BLOB, so the cache stays independent of the response format (parsing into vectors happens later). Pixel-based SHA-256 hash, commit after each request (crash-safe), retry only on 429/5xx, immediate failure on other 4xx. API request format (multipart field 'file', token header 'token') is still an assumption."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Ran a web search to verify literature (CLIP-Dissect, 'Mind the Gap' modality gap), then explained conceptually how to label the surrogate's linear head via the joint image-text space with WordNet as the dictionary, how the modality gap affects it, and how to correct and validate it; gave a short code sketch.",
+    "prompt": "Ich habe jetzt ein Surrogat Modell erstellt und eine Dictionary Attack auf das Surrogate Modell laufen lassen. Allerdings finde ich die Bilder nicht so aufschlussreich. In der Vorlesung wurde angesprochen, wie man den gemeinsamen Emebdding Space von Bild und Text nutzen könnte, um Dinge zu identifizieren? Da gibt es aber bestimmmt eine Modality gap? Ich würde wahrscheinlich hier als Dictionary wordnet verwenden. Wie würde das aber konzeptionell funktionieren?",
+    "location_of_edit": "No file edited; conceptual sketch in chat (analysis step after fitting the ridge surrogate head: text-embedding WordNet nouns and scoring them with the head weights).",
+    "knowledge_extracted": "Head is linear on the CLIP image space, which is shared with text -> score each WordNet concept text embedding t with the head: s_k(t) = w_k·t (+b_k), rank words per output = textual 'dictionary attack' without image optimization (like CLIP-Dissect). Modality gap (Liang et al. 2022): image and text embeddings lie in separate cones, offset Δ≈μ_img−μ_txt. Key insight: a constant shift only adds w_k·Δ per output -> ranking of words within one output unchanged; it matters for comparisons across outputs/absolute scores. Fix: center each modality (t − μ_txt + μ_img), renormalize if the head expects L2-normed inputs; or use contrastive scores w_k − mean_j w_j. Requirements: text encoder must belong to the same local CLIP on which the ridge head was fit; prompt templates + ensembling ('a photo of a {}'); WordNet nouns (~82k synsets), aggregate via hypernyms. Validate top concepts against the real API with real images."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Reviewed the user's snippet from knowledge of the PIL API, found the bug (thumbnail works in place and returns None) and gave a corrected version.",
+    "prompt": "def parse_img_tobase64(image):\n    image = image.thumbnail((1024, 1024))\n    buf = io.BytesIO()\n    image.save(buf, format=\"PNG\")\n    return base64.b64encode(buf.getvalue()).decode(\"utf-8\")\n\nWie stelle ich hier nochmal sicher, dass ein Bild max 1024x1024 ist?",
+    "location_of_edit": "Function parse_img_tobase64 (image encoding before the API request).",
+    "knowledge_extracted": "Image.thumbnail() modifies the image in place and returns None -> 'image = image.thumbnail(...)' sets image to None and save() fails. Fix: work on a copy (img = image.copy(); img.thumbnail((1024,1024))) so the caller's image is unchanged. thumbnail keeps the aspect ratio and only shrinks, never enlarges; resample=Image.LANCZOS for quality. Convert to RGB before saving. Compute the cache hash on the image that is actually sent (after resizing) so cache and API input match."
+  },
+  {
+    "model": "claude-opus-5-5",
+    "description of steps": "Answered from knowledge (linear algebra of ridge regression, CLIP embedding dimensions); suggested a learning-curve and effective-rank check instead of a fixed number.",
+    "prompt": "Reichen eigentlich 1000 Bilder? Odre sollte ich einen größeren Datenstaz suchen?",
+    "location_of_edit": "No file edited; check snippet in chat (data collection / surrogate evaluation step).",
+    "knowledge_extracted": "For a linear head on the same backbone you need n ≥ d+1 linearly independent embeddings: d=512 (B/32, B/16), 768 (L/14), 1024 (H/14), 1280 (bigG) -> 1000 images suffice for B/L, are borderline for H and too few for bigG (ridge then only regularizes the underdetermined part). Diversity matters more than count: images from a narrow domain span a low-dimensional subspace (check the effective rank/singular values of Z). With a mismatched backbone, more data helps (several thousand). Practical: learning curve of held-out R² over n = 250/500/750/1000; if it still rises, collect more (e.g. 3–5k diverse images from DomainNet/CLIP_benchmark). The WordNet text analysis needs no extra API queries."
+  }
+]
