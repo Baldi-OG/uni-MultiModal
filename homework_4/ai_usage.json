@@ -1,0 +1,70 @@
+{
+  "jonas": {
+    "details": [
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Planned a torch DataLoader wrapper around the HF dataset (map-style + optional streaming, num_workers, pin_memory, prefetch_factor, persistent_workers, convert('RGB') transform, optional CUDA prefetcher).",
+        "prompt": "In my last exercise I loaded a dataset completly in memory:\n\ndf = load_dataset(HG_DATASET).shuffle(seed=SEED)\ntrain_data = df[\"train\"]\n\nAs this might not scale well for bigger tasks and the fact that there is no preproc done. Can you write me a torch data loader class that does prefetching , pins memeory etc. As preproc apply\n\n.convert(\"RGB\")",
+        "location_of_edit": "Planned and proposed code for HFImageDataset.",
+        "knowledge_extracted": "Planned design: torch Dataset wrapping HF dataset with on-the-fly convert('RGB'); DataLoader(num_workers>0, pin_memory=True, prefetch_factor, persistent_workers=True); streaming=True avoids downloading the whole dataset (HF IterableDataset splits shards across workers); PIL images of different sizes need a resize/transform or a list-collate before batching; non_blocking .to(device) benefits from pinned memory. Note: non-streaming load_dataset memory-maps Arrow files from disk rather than holding everything in RAM."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Reviewed the user's HFImageDataset + DataLoader code from knowledge of PyTorch multiprocessing (no error message given); identified the likely Windows-specific cause and other issues, gave a fixed version.",
+        "prompt": "class HFImageDataset(Dataset): ... (HF dataset wrapper with convert('RGB'), custom_collate_fn returning the list, DataLoader with num_workers/pin_memory/prefetch_factor in an if/else) Is this a windows specific problem? Something with multiworker?",
+        "location_of_edit": "HFImageDataset class, custom_collate_fn and the DataLoader construction (if NUM_WORKER > 0 / else block).",
+        "knowledge_extracted": "Yes, very likely Windows: DataLoader workers use 'spawn' there (not fork), so each worker re-imports __main__ and must unpickle the Dataset, collate_fn and transform. Classes/functions defined in a Jupyter notebook cannot be found by the worker (AttributeError: Can't get attribute 'HFImageDataset' on <module '__main__'> or hanging) -> move them into a .py module and import them; in scripts guard with if __name__ == '__main__'; no lambdas as transform. persistent_workers=True avoids slow re-spawning every epoch. Other notes: pin_memory has no effect on lists of PIL images (only tensors) -> pin after converting to tensors; shuffle=False loses the earlier shuffling; the if/else can be collapsed by only adding prefetch_factor/persistent_workers when num_workers > 0."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Answered from knowledge of the transformers / open_clip / openai-clip APIs: how to read the tokenizer vocabulary and the token embedding matrix, plus how to turn vocabulary tokens into joint-space embeddings.",
+        "prompt": "How do I get access to the vocabulary of a trained CLIP model?",
+        "location_of_edit": "No file edited; snippets in chat.",
+        "knowledge_extracted": "CLIP uses a byte-level BPE tokenizer with 49,408 tokens (incl. <|startoftext|>=49406, <|endoftext|>=49407); '</w>' marks word-final tokens. HF: CLIPTokenizer.from_pretrained(name).get_vocab() -> {token: id}; input token embeddings: model.text_model.embeddings.token_embedding.weight (49408 x text width, 512 for B/32 & B/16, 768 for L/14). open_clip: open_clip.get_tokenizer(name).encoder / model.token_embedding.weight. Vocabulary = subword pieces, not words; token embeddings are NOT in the joint image-text space -> to compare with images run tokens (e.g. whole-word tokens ending in '</w>', ~30k) through the text encoder via model.get_text_features in batches. SigLIP uses a different (SentencePiece) tokenizer."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Analyzed the user's PEZ (hard-prompt optimization) draft: all runs (classes x variants x seeds) were optimized sequentially with batch size 1 through the CLIP text encoder, plus an extra forward pass at every eval. Rewrote it so that all runs are optimized in parallel as one batch (P: (R, M, d_tok)), with a vectorized loss and per-run best-prompt tracking. Not executed (no torch available in the sandbox; the user stopped the install earlier).",
+        "prompt": "I think I have a working solution. But it is extreeeemly slow. I waited over a hour for the optimization to finsih. Can you rewrite my draft so that it uses batch mode? (code: _inject_hook forward hook on token_emb, dummy_ids, encode_prompt_embeds, encode_text, targets/centroids/surr_dir per class, VARIANTS + prompt_loss (attraction, CE vs sibling centroid, surrogate direction), pez() optimization loop, evaluate() + loop over CLASSES x VARIANTS x seeds)",
+        "location_of_edit": "_inject_hook (now supports per-row P of shape (R, M, d)), dummy_ids (batch dim R), encode_prompt_embeds -> encode_prompt_embeds_batch, new stacked class tensors (TGT, CEN, SIB, SUR), prompt_loss -> prompt_loss_batch (returns per-run loss), pez -> pez_batch(runs), evaluation loop (one call for all runs + batched encode_text).",
+        "knowledge_extracted": "Main cause of slowness: R = |CLASSES|*3*3 independent runs x 3000 steps, each a batch-1 forward+backward through the text encoder plus a redundant re-encode at every eval. Since runs don't interact, they can be stacked: summing per-run losses gives each P_r exactly its own gradient, and AdamW works elementwise, so it is equivalent to separate runs (except different random batch sampling). Further speedups: clip_backbone.eval().requires_grad_(False) (no gradients for CLIP weights), build dummy ids once, reuse t from the forward pass for eval, fewer .item() syncs; optional bf16 autocast. The forward hook must be removed and registered again after redefining _inject_hook. Requires that all classes have the same TOP_K targets (for torch.stack) and that project() works on (N, d)."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Loaded the dataviz skill, validated a 3-color categorical palette with its validator (pass; contrast warning -> direct labels + table view), wrote plot_loss.py with matplotlib small multiples, tested it on synthetic histories, inspected the rendered PNG and fixed overlapping end labels.",
+        "prompt": "Can you code me a visulaization that displays th eloss curves, we have tracked?",
+        "location_of_edit": "New file plot_loss.py: histories_to_df (histories dict -> long DataFrame), plot_loss_curves (rows = classes, columns = metrics, mean over seeds + min-max band, colored + line-styled per variant, collision-aware direct labels, optional noisy batch_loss), final_summary (table of final/best loss & attraction per class x variant).",
+        "knowledge_extracted": "The 'loss' values are not comparable across variants (different loss weights A1/A2/A3 add terms), so compare variants on the 'attract' metric (shared L1 term) and use 'loss' only for convergence within a variant. Mean over seeds + min-max band shows seed variance without spaghetti lines. Color + line style per variant makes it readable without color; direct labels only when they don't overlap."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Wrote sd_verify.py (generate images with Stable Diffusion 2.1 base for the approach-3 (A3) prompts, send each to the API via the user's query_api, display a grid with API prediction and scores, summary table). Tested the parsing, grid display and summary with mock images and mock API responses (diffusers/torch not available in the sandbox, so the generation step itself is untested).",
+        "prompt": "I now want to include another verification step: use this stable diff model to generate images of the approach 3 prompts. Send them to the API and display them with result and scores. (sd-research/stable-diffusion-2-1-base; query_api(img) posts base64 PNG + CLASSES as JSON to TARGET_SERVER_URL)",
+        "location_of_edit": "New file sd_verify.py: parse_scores (API response -> {class: score}, adapt to the real format), generate_and_query (SD pipeline per prompt, fixed generator seeds, saves PNGs, calls query_api), show_results (grid rows = classes, columns = seed x image, ✓/✗ + predicted class/score + target score), summary (hit rate, mean target score, most common prediction per class). Notebook cell: load StableDiffusionPipeline, select A3 prompts from df_res.",
+        "knowledge_extracted": "Verification loop: optimized hard prompt -> text-to-image -> closed-box API checks whether the prompt really encodes the class concept. SD 2.1 uses an OpenCLIP ViT-H text encoder, i.e. a different text encoder than the local CLIP used for PEZ, so this also tests whether the prompts transfer across models (gibberish tokens often don't). Fixed per-image generator seeds make results reproducible; saving PNGs avoids regenerating. Response format of the API is unknown -> parse_scores handles dict {class: score}, {'scores'|'probabilities'|...: ...} or a list aligned with CLASSES."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Extended the user's batched PEZ loss with a fourth term (multi-class contrastive loss against all class centroids), using the 4th weight of VARIANTS; ran the palette validator for a 4th plot color (A4) for plot_loss.py.",
+        "prompt": "VARIANTS = {A1..A4 with 4 weights}, TAU = 0.05, RUNS/TGT/COWN/CSIB/SDIR/W stacked per run, batched_loss(t, tgt) with att + con (own vs sibling CE) + sur. I began to add a forth loss. This time I also want to penalize closeness to any other class. So that e.g. class 1 should be maximized, while any other class should be minimized",
+        "location_of_edit": "Setup cell after RUNS/TGT/... (new tensors CALL (all class centroids) and OWN_IDX per run), batched_loss (new term L4 = CE over all centroids, weighted by W[:, 3]); plot_loss.py VARIANT_STYLE (A4 entry).",
+        "knowledge_extracted": "L4 = multi-class InfoNCE/softmax CE: logits = t·c_j / TAU for all class centroids j, target = own class -> pulls t to its own centroid and pushes it from all others; with small TAU the softmax concentrates on the closest (hardest) negatives. L2 is the 2-class special case (own vs sibling), so A4 weights the sibling twice (intended or set w_con=0 to isolate L4). Alternative: use the surrogate head directions of the other classes as negatives (closer to what the closed box decides). Add A4 to the plot styles (4th validated color #eda100, dotted)."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Rewrote the L4 term to use the surrogate head directions of all classes as the softmax logits instead of the image centroids; added an optional modality-gap correction because L4 compares scores across classes.",
+        "prompt": "That is a great catch! Use the surrogate head direction",
+        "location_of_edit": "Setup cell (SALL = stacked surr_dir of all classes, OWN_IDX, TAU_SUR, optional MU_IMG/MU_TXT gap vectors) and batched_loss (L4 = CE over t_img @ SALL.T / TAU_SUR).",
+        "knowledge_extracted": "L4 with surrogate directions: logits_j = t·s_j / TAU_SUR, target = own class -> maximizes the own decision direction relative to all others (closer to what the closed box decides than centroids). surr_dir only exists for CLASSES, so only those are negatives. Modality gap matters here: the head directions were fit on image embeddings, a text embedding has a gap offset Δ that adds a class-dependent constant s_j·Δ to each logit -> biases the softmax across classes (unlike L3, where it is a per-class constant). Fix: score t_img = normalize(t − μ_txt + μ_img). Cosines between text features and head directions are often small, so TAU_SUR may need separate tuning. If two classes share a head with opposite sign, s_other = −s_own, so the CE term is consistent with L3."
+      },
+      {
+        "model": "claude-opus-5-5",
+        "description of steps": "Answered from knowledge of PyTorch CUDA memory management.",
+        "prompt": "How do I clear my gpu memory after image generation again?",
+        "location_of_edit": "No file edited; cell after generate_and_query / the Stable Diffusion step.",
+        "knowledge_extracted": "Delete all references to the pipeline (del pipe, plus any other variable holding it or its outputs/tensors), run gc.collect() so Python frees the objects, then torch.cuda.empty_cache() to return cached blocks to the driver; check with torch.cuda.memory_allocated()/memory_reserved(). In Jupyter, hidden references (Out[], _, exception tracebacks) can keep objects alive. Alternative: pipe.to('cpu') or enable_model_cpu_offload(). Restarting the kernel is the only guaranteed full reset."
+      }
+    ],
+    "general_llm_usage": "I used AI for three purposes: (1) assistant that helps me debug my code (2) implementing and testing supporting code. (3) an academic sparring partner for methodology."
+  }
+}
