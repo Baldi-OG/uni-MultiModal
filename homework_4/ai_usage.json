@@ -1,0 +1,34 @@
+{
+  "baldi": {
+    "details": [
+      {
+        "model": "GPT-3.5",
+        "description_of_steps": "1. Iterate through all tokens and their IDs in the tokenizer's vocabulary.\n2. For tokens ending with '</w>', treat them as whole words and check if they are ASCII, alphabetic, and at least min_len characters long.\n3. Include such valid words in the list of IDs.\n4. For tokens not ending with '</w>', include them unconditionally (i.e., all subword tokens, special tokens, etc.).\n5. Sort the collected IDs and return them as a tensor on the specified device.",
+        "prompt": "Here use the entire token-space instead of just the subset of \"whole English-looking words\"",
+        "location_of_edit": "The condition if t.endswith(\"</w>\") and the subsequent filtering logic is modified to include all tokens, not just those matching the English-looking word criteria.",
+        "knowledge_extracted": "The original function filtered tokens to only include whole English-like words (ASCII, alphabetic, length >= min_len) that end with '</w>'. The revised version includes all tokens, regardless of whether they are whole words or subword tokens, by removing the filtering condition for non-'</w>' tokens and including them unconditionally."
+      },
+      {
+        "model": "GPT-4",
+        "description_of_steps": "1. Remove A1 and A2 from the VARIANTS dictionary, keeping only A3 and A4. 2. Remove the `con` (L2) loss computation from `batched_loss` since it was introduced in A2 and is no longer needed. 3. Update the return statement to exclude `W[:, 1] * con`.",
+        "prompt": "From this remove Variants A1 and A2 and the according loss calculations",
+        "location_of_edit": "VARIANTS dictionary (removed A1 and A2 entries), batched_loss function (removed `con` computation and its term in the return statement)",
+        "knowledge_extracted": "A1 used only L1 (att), A2 added L2 (con). By removing A1 and A2, the con loss term becomes unused since A3 and A4 do not rely on it exclusively. The return statement is updated to reflect only the remaining active loss terms: att (L1), sur (L3), and multi (L4)."
+      },
+      {
+        "model": "GPT-4",
+        "description_of_steps": "1. Analyze loss curves to determine convergence behavior: curves plateau around step 500-800 with noise. 2. Choose patience-based early stopping over hard threshold since variants have different plateau levels (A3~1.6, A4~2.0). 3. Add `patience` and `min_delta` parameters to the function signature. 4. Initialize per-run `no_improve_counts` and `early_stopped` tensors. 5. Add a check at the start of each step to break if all runs have early stopped. 6. Update `improved` condition to include `min_delta`. 7. Update `no_improve_counts` and `early_stopped` tensors inside the eval block.",
+        "prompt": "Add early stopping to pez_batched(), for the threshold take a look at the provided loss curves.",
+        "location_of_edit": "Function signature (added patience and min_delta params), loop body (added early_stopped.all() break condition), eval block (added no_improve_counts and early_stopped update logic, modified improved condition to use min_delta)",
+        "knowledge_extracted": "Loss curves for A3 variants plateau around 1.6-1.7 and A4 around 2.0-2.1, both stabilizing after ~500-800 steps. Patience-based early stopping is more robust than a hard threshold when multiple variants with different loss scales are optimized simultaneously. Per-run tracking ensures faster-converging runs don't prematurely stop slower ones."
+      },
+      {
+        "model": "GPT-4",
+        "description_of_steps": "1. Remove the hardcoded VARIANT = 'A3' constant. 2. Filter df_res to only A3 and A4 rows. 3. Group by (class, variant) and compute mean surr score. 4. For each class, pick the variant with the higher mean surr score using sort_values + drop_duplicates. 5. Store result as a dict mapping class -> best variant. 6. Update the sel DataFrame filter to use this per-class best variant lookup instead of a fixed variant string.",
+        "prompt": "Instead of always taking the prompts from VARIANT, take a look at the mean \"surr\" score for that class from def_res and always choose the Variant (A3 or A4) for that class that scored higher.",
+        "location_of_edit": "Removed VARIANT constant, replaced sel filter with dynamic per-class variant selection based on mean surr score from df_res",
+        "knowledge_extracted": "The df_res DataFrame contains columns including 'class', 'variant', and 'surr'. By grouping on (class, variant) and aggregating surr with mean, then taking the argmax per class, we can dynamically select the best-performing variant per class rather than using a single hardcoded variant for all classes."
+      }
+    ]
+  }
+}
